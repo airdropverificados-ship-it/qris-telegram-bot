@@ -1,0 +1,11 @@
+# Bot de Telegram (async, python-telegram-bot v22)
+python-telegram-bot[rate-limiter]==22.8
+# Servidor webhook
+aiohttp==3.10.11
+# Cliente HTTP (Xendit + CoinGecko)
+httpx==0.28.1
+# Generación del QR como PNG
+qrcode[pil]==8.2
+Pillow==11.0.0
+# Cargar variables desde .env
+python-dotenv==1.0.1
