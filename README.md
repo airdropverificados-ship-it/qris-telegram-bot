@@ -1,170 +1,171 @@
 # Telegram Bot with QRIS Payments (Xendit) + USDT Balance
 
-> **In English:** a Telegram bot that issues dynamic QRIS payment codes via
-> Xendit, confirms payment through a webhook, converts the amount to USDT at
-> the CoinGecko rate and credits the user's in-bot balance. Python, SQLite,
-> polling + webhook server, with a test suite. The detailed documentation below
-> is in Spanish. Note: QRIS payments only work in Indonesia, and collecting
-> real money requires an Indonesian Xendit merchant account.
+> A Telegram bot that issues dynamic QRIS payment codes via Xendit,
+> confirms payment through a webhook, converts the amount to USDT at the
+> CoinGecko rate and credits the user's in-bot balance. Python, SQLite,
+> polling + webhook server, with a test suite. **Note:** QRIS payments only
+> work in Indonesia, and collecting real money requires an Indonesian
+> Xendit merchant account.
 
-# Bot de Telegram con pagos QRIS (Xendit) + saldo USDT
+# What it does
 
-Bot que genera códigos QR QRIS para cobrar en rupias indonesias (IDR)
-y acredita el equivalente en USDT en el saldo interno del usuario.
+1. The user asks `/pagar 50000` → the bot creates a dynamic QRIS QR code
+   in Xendit and sends the image.
+2. The user scans the QR with GoPay, OVO, DANA or their bank and pays.
+3. Xendit notifies the webhook (`POST /webhook/qris`). Every order carries
+   the Telegram id inside (`tg_<user_id>_<uuid8>`), so the bot knows exactly
+   who paid, how much and with which app.
+4. The bot converts the amount to USDT at the CoinGecko rate and credits
+   the user's internal balance (`/balance`).
 
-## Qué hace
+## ⚠️ Real requirements (read before getting excited)
 
-1. El usuario pide `/pagar 50000` → el bot crea un QR dinámico QRIS
-   en Xendit y envía la imagen.
-2. El usuario escanea el QR con GoPay, OVO, DANA o su banco y paga.
-3. Xendit avisa al webhook (`POST /webhook/qris`). Cada orden lleva
-   el id de Telegram dentro (`tg_<user_id>_<uuid8>`), así que el bot
-   sabe exactamente quién pagó, cuánto y con qué app.
-4. El bot convierte el importe a USDT con la tasa de CoinGecko y lo
-   acredita en el saldo interno del usuario (`/balance`).
+- **QRIS is Indonesia-only.** Paying requires an Indonesian app (GoPay,
+  OVO, DANA, Indonesian banks). Outside Indonesia nobody can pay these QRs.
+- **Collecting real money requires a Xendit merchant account:**
+  company registration in Indonesia + Indonesian bank account + KYC/KYB
+  verification. Without that, the code only works in test/sandbox mode
+  (with `xnd_development_...` keys and simulated payments). This
+  repository includes no account and no keys.
+- **The USDT balance is INTERNAL to the bot, not an on-chain transfer.**
+  The real IDR stays in the merchant's Xendit account / Indonesian bank.
+  Converting that IDR into real USDT in a wallet is a separate manual step
+  (the gateway does not settle in crypto). The bot never sends USDT to any
+  wallet: it only records an internal balance at the market rate at the
+  moment of payment.
+- The IDR/USDT rate comes from the free public CoinGecko API (no key). If
+  it fails, the payment stays paid-but-unconverted and is retried with
+  `/reintentar` or `/mispagos`. An invented amount is never credited.
 
-## ⚠️ Requisitos reales (léelo antes de ilusionarte)
-
-- **QRIS es solo para Indonesia.** Pagar exige una app indonesia
-  (GoPay, OVO, DANA, bancos indonesios). Fuera de Indonesia nadie
-  puede pagar estos QR.
-- **Cobrar dinero real exige una cuenta de comercio (merchant) en
-  Xendit**: registro de empresa en Indonesia + cuenta de banco
-  indonesia + verificación KYC/KYB. Sin eso, el código solo funciona
-  en modo test/sandbox (con claves `xnd_development_...` y pagos
-  simulados). Este repositorio no incluye ninguna cuenta ni clave.
-- **El saldo USDT es INTERNO del bot, no una transferencia on-chain.**
-  El IDR real queda en la cuenta de Xendit / banco indonesio del
-  comercio. Convertir ese IDR en USDT real en una billetera es un
-  paso manual aparte (la pasarela no liquida en cripto). El bot no
-  envía USDT a ninguna billetera: solo anota un saldo interno a la
-  tasa de mercado del momento del pago.
-- La tasa IDR/USDT viene de la API pública gratuita de CoinGecko
-  (sin clave). Si falla, el pago queda pagado-pero-sin-convertir y
-  se reintenta con `/reintentar` o `/mispagos`. Nunca se acredita
-  un importe inventado.
-
-## Instalación
+## Install
 
 ```bash
 python -m venv .venv
 .venv/bin/pip install -r requirements.txt
-cp .env.example .env   # rellena BOT_TOKEN, XENDIT_API_KEY,
+cp .env.example .env   # fill in BOT_TOKEN, XENDIT_API_KEY,
                        # XENDIT_CALLBACK_TOKEN, WEBHOOK_URL, ADMIN_ID
 .venv/bin/python run.py
 ```
 
-El bot atiende por polling y el webhook escucha en el puerto
-`WEBHOOK_PORT` (8080 por defecto).
+The bot serves via polling and the webhook listens on `WEBHOOK_PORT`
+(8080 by default).
 
-## Configurar Xendit
+## Configure Xendit
 
-1. En el panel de Xendit: Settings → API Keys → crea una clave
-   secreta (test: `xnd_development_...`).
-2. Activa QR Codes en Settings → Payment Methods.
-3. En Settings → Callbacks → **QR code paid & refunded**: pon la
-   URL pública de tu webhook (`https://tu-dominio/webhook/qris`) y
-   copia el **Verification Token** a `XENDIT_CALLBACK_TOKEN` en `.env`.
-4. El webhook debe ser accesible desde internet: usa un dominio con
-   HTTPS o, para probar en local, un túnel (ngrok, Cloudflare Tunnel).
-   Sin URL pública, Xendit no puede avisar de los pagos.
+1. In the Xendit dashboard: Settings → API Keys → create a secret key
+   (test: `xnd_development_...`).
+2. Enable QR Codes in Settings → Payment Methods.
+3. In Settings → Callbacks → **QR code paid & refunded**: set your public
+   webhook URL (`https://your-domain/webhook/qris`) and copy the
+   **Verification Token** to `XENDIT_CALLBACK_TOKEN` in `.env`.
+4. The webhook must be reachable from the internet: use a domain with
+   HTTPS or, to test locally, a tunnel (ngrok, Cloudflare Tunnel).
+   Without a public URL, Xendit cannot notify payments.
 
-## Probar en modo test (sin dinero real)
+## Test in test mode (no real money)
 
-1. Usa la clave `xnd_development_...` y la callback URL de test.
-2. `/pagar 50000` en el bot → recibes el QR.
-3. Simula el pago con la API de Xendit (sustituye `TU_CLAVE` y el
-   `reference_id` = order_id del QR):
+1. Use the `xnd_development_...` key and the test callback URL.
+2. `/pagar 50000` in the bot → you receive the QR.
+3. Simulate the payment with the Xendit API (replace `YOUR_KEY` and the
+   `reference_id` = the QR's order id):
 
 ```bash
 curl https://api.xendit.co/qr_codes/tg_123456789_ab12cd34/payments/simulate \
-  -X POST -u TU_CLAVE: -H "api-version: 2022-07-31" -d amount=50000
+  -X POST -u YOUR_KEY: -H "api-version: 2022-07-31" -d amount=50000
 ```
 
-Xendit enviará el webhook real a tu URL y el bot acreditará el saldo.
+Xendit will send the real webhook to your URL and the bot will credit
+the balance.
 
-## Comandos
+## Commands
 
-| Comando | Qué hace |
+| Command | What it does |
 |---|---|
-| `/start` | Bienvenida |
-| `/pagar [importe]` | Genera un QR QRIS (1.500–10.000.000 IDR) |
-| `/mispagos` | Lista tus pagos y actualiza su estado |
-| `/balance` | Tu saldo interno en USDT + movimientos |
-| `/reintentar` | Reintenta conversiones pendientes |
-| `/reembolsar` | (Solo admin) revierte un pago y resta su saldo |
-| `/cancelar` | Cancela la operación actual |
-| `/help` | Ayuda |
+| `/start` | Welcome |
+| `/pagar [amount]` | Generates a QRIS QR (1,500–10,000,000 IDR) |
+| `/mispagos` | Lists your payments and refreshes their status |
+| `/balance` | Your internal USDT balance + movements |
+| `/reintentar` | Retries pending conversions |
+| `/reembolsar` | (Admin only) reverses a payment and subtracts its balance |
+| `/cancelar` | Cancels the current operation |
+| `/help` | Help |
 
-## Reembolsos
+## Refunds
 
-Xendit avisa de los reembolsos por el mismo callback
-("QR code paid & refunded"). Cuando llega el aviso, el bot revierte
-el saldo que ese pago había acreditado (con constancia en el ledger)
-y avisa al usuario y al admin. Un segundo aviso del mismo reembolso
-no resta dos veces. Si el aviso no llega, el admin puede revertir
-un pago a mano con `/reembolsar <order_id>`.
+Xendit reports refunds through the same callback ("QR code paid &
+refunded"). When the notice arrives, the bot reverses the balance that
+payment had credited (recorded in the ledger) and notifies the user and
+the admin. A second notice of the same refund does not subtract twice.
+If the notice never arrives, the admin can reverse a payment by hand
+with `/reembolsar <order_id>`.
 
-## Arquitectura
+## Architecture
 
 ```
-run.py            arranque: bot (polling) + webhook (aiohttp)
+run.py            start: bot (polling) + webhook (aiohttp)
 qrisbot/
-  config.py       variables de entorno (.env)
-  db.py           SQLite: users, payments, ledger (auditoría)
-  xendit.py       cliente API QR Codes (crear QR, pagos, simular)
-  rates.py        tasa CoinGecko + conversión (redondeo hacia abajo)
+  config.py       environment variables (.env)
+  db.py           SQLite: users, payments, ledger (audit)
+  xendit.py       QR Codes API client (create QR, payments, simulate)
+  rates.py        CoinGecko rate + conversion (rounds down)
   qrgen.py        qr_string -> PNG
-  payments.py     lógica: webhook, idempotencia, conversión, avisos
-  webhook.py      POST /webhook/qris (verifica x-callback-token)
-  bot.py          comandos de Telegram
-tests/            unittest sin red (firma, duplicados, conversión)
+  payments.py     logic: webhook, idempotency, conversion, notices
+  webhook.py      POST /webhook/qris (verifies x-callback-token)
+  bot.py          Telegram commands
+tests/            unittest, no network (signature, duplicates, conversion)
 ```
 
-Dinero: el saldo se guarda en micro-USDT (entero, 1 USDT = 1.000.000).
-Nunca se usa float para dinero. La conversión redondea hacia abajo.
+Money: the balance is stored in micro-USDT (integer, 1 USDT = 1,000,000).
+Floats are never used for money. Conversion rounds down.
 
-## Seguridad
+## Security
 
-- El webhook verifica la cabecera `x-callback-token` antes de
-  procesar nada (401 si no coincide). Sin esto cualquiera podría
-  falsificar un pago.
-- Endurecimiento del webhook: límite de peticiones por minuto y por
-  IP (`WEBHOOK_RATE_LIMIT_PER_MINUTE`, 120 por defecto) y lista
-  opcional de IPs permitidas (`XENDIT_WEBHOOK_IPS`). En producción
-  (clave `xnd_production_`) el bot no arranca si `WEBHOOK_URL` no
-  es HTTPS.
-- Idempotencia: Xendit reintenta los webhooks; un duplicado no
-  acredita dos veces (el UPDATE exige `status = 'pending'` y la
-  conversión exige `conversion_status != 'converted'`). Lo mismo
-  vale para los reembolsos.
-- Si el importe del webhook no coincide con el pedido, el pago se
-  marca fallido, no se acredita nada y se avisa al admin. Los
-  importes ambiguos (float, texto raro) se rechazan sin acreditar.
-- SQLite en modo WAL con `busy_timeout` de 10 s: el bot y el
-  webhook escriben a la vez sin bloqueos.
-- Los textos que vienen de fuera (nombres de usuario, app de pago)
-  se escapan antes de ir a un mensaje HTML de Telegram.
-- Máximo 5 QR pendientes por usuario (anti-spam de creación).
-- Las claves solo viven en `.env` (nunca en el código).
+- The webhook verifies the `x-callback-token` header before processing
+  anything (401 on mismatch). Without this, anyone could fake a payment.
+- Webhook hardening: per-minute and per-IP rate limit
+  (`WEBHOOK_RATE_LIMIT_PER_MINUTE`, 120 by default) and an optional
+  allowlist of IPs (`XENDIT_WEBHOOK_IPS`). In production (a
+  `xnd_production_` key) the bot refuses to start unless `WEBHOOK_URL`
+  is HTTPS.
+- Idempotency: Xendit retries webhooks; a duplicate never credits twice
+  (the UPDATE requires `status = 'pending'` and conversion requires
+  `conversion_status != 'converted'`). The same holds for refunds.
+- If the webhook amount does not match the order, the payment is marked
+  failed, nothing is credited and the admin is notified. Ambiguous
+  amounts (floats, weird text) are rejected without crediting.
+- SQLite in WAL mode with a 10 s `busy_timeout`: the bot and the webhook
+  write at the same time without locking.
+- Text coming from outside (usernames, payment app names) is escaped
+  before going into a Telegram HTML message.
+- Maximum 5 pending QRs per user (anti-spam on creation).
+- Keys only live in `.env` (never in the code).
 
-Auditoría externa: el código pasó una auditoría con Grok
-(22 nov 2026). Los 4 puntos mayores que encontró (SQLite sin WAL,
-falta de reembolsos, endurecimiento del webhook, escape HTML)
-están corregidos y cubiertos por tests (`tests/test_grok_fixes.py`).
-La matemática del dinero y la idempotencia salieron correctas.
+External audit: the code passed an audit with Grok (22 Nov 2026). The 4
+major points it found (SQLite without WAL, missing refunds, webhook
+hardening, HTML escaping) are fixed and covered by tests
+(`tests/test_grok_fixes.py`). The money math and idempotency came out
+correct.
 
-## Alternativa: Midtrans
+## Alternative: Midtrans
 
-Si prefieres otro gateway indonesio, Midtrans ofrece QRIS con su
-Core API (`POST /v2/charge`, `payment_type: "qris"`) y notificaciones
-HTTP verificadas con `signature_key` (SHA-512 de
-`order_id + status_code + gross_amount + server_key`). La estructura
-de este proyecto (orden con user id + webhook verificado + conversión)
-sirve igual cambiando solo `xendit.py` y el verificador del webhook.
+If you prefer another Indonesian gateway, Midtrans offers QRIS with its
+Core API (`POST /v2/charge`, `payment_type: "qris"`) and HTTP
+notifications verified with `signature_key` (SHA-512 of
+`order_id + status_code + gross_amount + server_key`). This project's
+structure (order with user id + verified webhook + conversion) works the
+same by changing only `xendit.py` and the webhook verifier.
 
 ## Tests
 
 ```bash
+.venv/bin/python -m pytest tests/ -q
+# or, with the standard library only:
 .venv/bin/python -m unittest discover -s tests -t . -v
 ```
+
+53 tests, no network. Install the dependencies first
+(`pip install -r requirements.txt`).
+
+## License
+
+MIT — see `LICENSE`.
